@@ -1,0 +1,53 @@
+{
+  "name": "web-tokenizer",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --turbopack",
+    "dev:monolith": "npm run sync:models:daemon >/tmp/tokenbuster-sync.log 2>&1 & next dev --turbopack",
+    "build": "next build",
+    "start": "next start",
+    "start:monolith": "npm run sync:models:daemon >/tmp/tokenbuster-sync.log 2>&1 & next start",
+    "start:fetcher": "node scripts/model-fetcher-service.mjs",
+    "lint": "next lint",
+    "sync:models": "node scripts/sync-models.mjs",
+    "sync:models:reset": "node scripts/sync-models.mjs --reset",
+    "sync:models:startup": "node scripts/sync-models.mjs --startup",
+    "sync:models:daemon": "node scripts/sync-models.mjs --loop --interval-min=5"
+  },
+  "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/language": "^6.11.2",
+    "@codemirror/legacy-modes": "^6.5.1",
+    "@codemirror/lint": "^6.8.5",
+    "@codemirror/view": "^6.38.1",
+    "@dqbd/tiktoken": "^1.0.21",
+    "@headlessui/react": "^2.2.5",
+    "@heroicons/react": "^2.2.0",
+    "@huggingface/jinja": "^0.5.1",
+    "@uiw/react-codemirror": "^4.24.1",
+    "@xenova/transformers": "^2.17.2",
+    "clsx": "^2.1.1",
+    "copy-to-clipboard": "^3.3.3",
+    "json5": "^2.2.3",
+    "next": "15.4.1",
+    "node-fetch": "^3.3.2",
+    "postcss": "^8.5.6",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "tiktoken": "^1.0.21",
+    "tokenizers": "^0.13.3",
+    "zod": "^4.0.5"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4.1.11",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "15.4.1",
+    "tailwindcss": "^4.1.11",
+    "typescript": "^5"
+  }
+}
