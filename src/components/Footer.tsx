@@ -15,7 +15,7 @@ export default function Footer() {
 
         {/* Right */}
         <div className="text-center md:text-right dark:text-white/40">
-          Made with <span className="text-amber-400">❤</span> by Olt Vrella
+          Made with <span className="text-amber-400">❤</span> by Sentry
         </div>
       </div>
     </footer>
