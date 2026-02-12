@@ -1,0 +1,31 @@
+services:
+  model-fetcher:
+    build:
+      context: .
+    user: "0:0"
+    command: node scripts/model-fetcher-service.mjs
+    environment:
+      FETCHER_PORT: 3100
+      SYNC_INTERVAL_MIN: 2
+      HF_API_KEY: ${HF_API_KEY:-}
+      HF_TOKEN: ${HF_TOKEN:-}
+    ports:
+      - "3100:3100"
+    volumes:
+      - model_store:/app/public
+      - sync_state:/app/out
+
+  web:
+    build:
+      context: .
+    command: npm start
+    environment:
+      MODEL_FETCHER_BASE_URL: http://model-fetcher:3100
+    depends_on:
+      - model-fetcher
+    ports:
+      - "3000:3000"
+
+volumes:
+  model_store:
+  sync_state:
