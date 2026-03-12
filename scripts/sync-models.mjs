@@ -161,7 +161,15 @@ function readNumericArg(prefix, fallback) {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
-async function runSingleBatch() {
+function readOptionalNumericArg(prefix) {
+  const raw = process.argv.find(arg => arg.startsWith(prefix));
+  if (!raw) return null;
+  const value = Number(raw.slice(prefix.length));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+async function runSingleBatch(options = {}) {
+  const maxModels = options.maxModels ?? null;
   const reset = process.argv.includes('--reset');
   const startupMode = process.argv.includes('--startup');
   const state = reset
@@ -211,7 +219,10 @@ async function runSingleBatch() {
   const existingValidIds = existingVerified.filter(Boolean);
   const existingValidSet = new Set(existingValidIds);
 
-  const pendingIds = uniqueIds.filter(id => !existingValidSet.has(id));
+  let pendingIds = uniqueIds.filter(id => !existingValidSet.has(id));
+  if (typeof maxModels === 'number') {
+    pendingIds = pendingIds.slice(0, maxModels);
+  }
   let failedCount = 0;
 
   const validated = await processWithConcurrency(pendingIds, CHECK_CONCURRENCY, async (modelId) => {
@@ -256,12 +267,59 @@ async function runSingleBatch() {
   if (startupMode) {
     console.log('[sync-models] startup mode complete');
   }
+
+  return {
+    nextCursor: nextCursor || null,
+    processedCandidates: uniqueIds.length,
+    attemptedDownloads: pendingIds.length,
+    validIds,
+    addedCount: validated.filter(Boolean).length,
+    totalModels: merged.length,
+    reachedEnd: !nextCursor,
+  };
+}
+
+async function runLimited(totalTarget) {
+  let remaining = totalTarget;
+  let totalAdded = 0;
+  let runs = 0;
+
+  console.log(`[sync-models] limited mode enabled, target new models: ${totalTarget}`);
+
+  while (remaining > 0) {
+    const result = await runSingleBatch({ maxModels: remaining });
+    runs += 1;
+    totalAdded += result.addedCount;
+    remaining -= result.addedCount;
+
+    console.log(
+      `[sync-models] limited progress: ${totalAdded}/${totalTarget} new models downloaded`
+    );
+
+    if (result.reachedEnd) {
+      console.log('[sync-models] limited mode reached end of available model pages');
+      break;
+    }
+
+    if (result.addedCount === 0 && result.attemptedDownloads === 0) {
+      console.log('[sync-models] limited mode found no remaining candidate downloads in this batch');
+      break;
+    }
+  }
+
+  console.log(`[sync-models] limited mode complete after ${runs} batch(es)`);
 }
 
 async function main() {
   const loopMode = process.argv.includes('--loop');
+  const maxModels = readOptionalNumericArg('--max-models=');
   const intervalMinutes = readNumericArg('--interval-min=', 15);
   const intervalMs = intervalMinutes * 60 * 1000;
+
+  if (maxModels) {
+    await runLimited(maxModels);
+    return;
+  }
 
   if (!loopMode) {
     await runSingleBatch();

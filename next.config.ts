@@ -6,6 +6,10 @@ const nextConfig: NextConfig = {
     buildActivity: false,
   },
   async rewrites() {
+    if (process.env.NEXT_PUBLIC_ENABLE_MODEL_FETCHER === 'false') {
+      return [];
+    }
+
     const fetcherBaseUrl = process.env.MODEL_FETCHER_BASE_URL || 'http://model-fetcher:3100';
     return [
       {
@@ -23,6 +27,18 @@ const nextConfig: NextConfig = {
       {
         source: '/api/fetcher-health',
         destination: `${fetcherBaseUrl}/health`,
+      },
+      {
+        source: '/api/fetcher-control/status',
+        destination: `${fetcherBaseUrl}/control/status`,
+      },
+      {
+        source: '/api/fetcher-control/start',
+        destination: `${fetcherBaseUrl}/control/start`,
+      },
+      {
+        source: '/api/fetcher-control/stop',
+        destination: `${fetcherBaseUrl}/control/stop`,
       },
     ];
   },

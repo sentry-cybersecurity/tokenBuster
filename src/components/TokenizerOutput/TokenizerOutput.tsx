@@ -9,11 +9,18 @@ interface TokenEditorProps {
   model: string;
   type: 'tiktoken' | 'xenova';
   externalLoading?: boolean;
+  fetcherEnabled?: boolean;
 }
 
 type TokenWithId = { id: number; text: string };
 
-export default function TokenEditor({ input, model, type, externalLoading = false }: TokenEditorProps) {
+export default function TokenEditor({
+  input,
+  model,
+  type,
+  externalLoading = false,
+  fetcherEnabled = true,
+}: TokenEditorProps) {
   const [, setTokens] = useState<number[]>([]);
   const [editedTokens, setEditedTokens] = useState<string>('');
   const [tokenDetails, setTokenDetails] = useState<TokenWithId[]>([]);
@@ -28,6 +35,10 @@ export default function TokenEditor({ input, model, type, externalLoading = fals
 
     (async () => {
       try {
+        if (type === 'xenova' && !fetcherEnabled) {
+          throw new Error('Model fetcher is disabled for non-GPT tokenizers.');
+        }
+
         setIsLoading(true);
         const tokenIds = await tokenize(input, model, type);
         setTokens(tokenIds);
@@ -49,6 +60,10 @@ export default function TokenEditor({ input, model, type, externalLoading = fals
     setEditedTokens(raw);
 
     try {
+      if (type === 'xenova' && !fetcherEnabled) {
+        throw new Error('Model fetcher is disabled for non-GPT tokenizers.');
+      }
+
       setIsLoading(true);
       const newTokenIds = raw.split(',').map(x => parseInt(x.trim())).filter(x => !isNaN(x));
       setTokens(newTokenIds);

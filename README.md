@@ -26,6 +26,7 @@ Then open `http://localhost:3000`.
 
 - `HF_API_KEY` or `HF_TOKEN`: token used by the fetcher when syncing private/rate-limited models.
 - `SYNC_INTERVAL_MIN`: fetch interval in minutes (default `5`).
+- `NEXT_PUBLIC_ENABLE_MODEL_FETCHER`: set to `false` to disable all fetcher-backed `/api/*` calls in the UI and Next rewrites.
 
 ## Patches in Xenova/Transformers library
 

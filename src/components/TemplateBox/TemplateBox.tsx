@@ -7,6 +7,7 @@ import { jinja2 } from '@codemirror/legacy-modes/mode/jinja2';
 import { lineNumbers, EditorView } from '@codemirror/view';
 import copy from 'copy-to-clipboard';
 import LoadingOverlay from '@/components/LoadingOverlay';
+import { isModelFetcherEnabled } from '@/utils/modelFetcher';
 
 const GPT_MODEL_REGEX = /^gpt(?:-3\.5|-4)?(?:-turbo)?/i;
 const isGptModel = (modelId: string) => GPT_MODEL_REGEX.test(modelId);
@@ -49,12 +50,18 @@ export default function TemplateBox({
   setChatInputs,
   isModelLoading = false,
 }: TemplateBoxProps) {
+  const fetcherEnabled = isModelFetcherEnabled();
   const [copied, setCopied] = useState(false);
   const [modelList, setModelList] = useState<string[]>([]);
   const [search, setSearch] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   useEffect(() => {
+    if (!fetcherEnabled) {
+      setModelList([]);
+      return;
+    }
+
     let isActive = true;
 
     const arraysEqual = (a: string[], b: string[]) =>
@@ -81,7 +88,7 @@ export default function TemplateBox({
       isActive = false;
       clearInterval(intervalId);
     };
-  }, []);
+  }, [fetcherEnabled]);
 
   const handleReset = () => {
     if (!selectedTemplate) return;
@@ -115,6 +122,7 @@ export default function TemplateBox({
           <div className="relative">
             <button
               onClick={() => setDropdownOpen(!dropdownOpen)}
+              disabled={!fetcherEnabled}
               className="text-xs px-2 py-1 border rounded dark:border-white/30 dark:text-white bg-white dark:bg-gray-800 min-w-[180px] text-left cursor-pointer"
             >
               {modelId || 'Select model'}
@@ -154,7 +162,7 @@ export default function TemplateBox({
           </div>
 
           <span className="text-xs px-2 py-1 border rounded dark:border-white/30 dark:text-white bg-white dark:bg-gray-800">
-            Models: {modelList.length}
+            Models: {fetcherEnabled ? modelList.length : 'off'}
           </span>
 
           {formattedTemplates.length > 1 && (

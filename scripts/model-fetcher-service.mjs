@@ -20,6 +20,17 @@ const MIME_TYPES = {
 };
 
 let shuttingDown = false;
+let syncProcess = null;
+let syncState = {
+  running: false,
+  mode: 'idle',
+  targetModels: null,
+  startedAt: null,
+  stoppedAt: null,
+  lastExitCode: null,
+  lastExitSignal: null,
+  intervalMin: INTERVAL_MIN,
+};
 
 function contentTypeFor(filePath) {
   const ext = path.extname(filePath).toLowerCase();
@@ -65,8 +76,31 @@ async function ensureDirectories() {
   }
 }
 
-function startSyncDaemon() {
-  const args = ['scripts/sync-models.mjs', '--loop', `--interval-min=${INTERVAL_MIN}`];
+function getStatusPayload() {
+  return {
+    ok: true,
+    service: 'model-fetcher',
+    running: syncState.running,
+    mode: syncState.mode,
+    targetModels: syncState.targetModels,
+    startedAt: syncState.startedAt,
+    stoppedAt: syncState.stoppedAt,
+    lastExitCode: syncState.lastExitCode,
+    lastExitSignal: syncState.lastExitSignal,
+    intervalMin: syncState.intervalMin,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+function startSyncProcess(mode, targetModels = null) {
+  const args = ['scripts/sync-models.mjs'];
+  if (mode === 'continuous') {
+    args.push('--loop', `--interval-min=${INTERVAL_MIN}`);
+  } else if (mode === 'limited' && targetModels) {
+    args.push(`--max-models=${targetModels}`);
+  } else {
+    throw new Error('Invalid sync start mode');
+  }
   if (RESET_ON_START) args.push('--reset');
 
   const child = spawn('node', args, {
@@ -75,26 +109,76 @@ function startSyncDaemon() {
     stdio: 'inherit',
   });
 
+  syncProcess = child;
+  syncState = {
+    ...syncState,
+    running: true,
+    mode,
+    targetModels,
+    startedAt: new Date().toISOString(),
+    stoppedAt: null,
+    lastExitCode: null,
+    lastExitSignal: null,
+  };
+
   child.on('exit', (code, signal) => {
+    syncProcess = null;
+    syncState = {
+      ...syncState,
+      running: false,
+      mode: 'idle',
+      targetModels: null,
+      stoppedAt: new Date().toISOString(),
+      lastExitCode: code ?? null,
+      lastExitSignal: signal ?? null,
+    };
+
     if (shuttingDown) return;
-    console.error(
-      `[model-fetcher] sync daemon exited unexpectedly (code=${code ?? 'null'}, signal=${signal ?? 'null'})`
-    );
-    process.exit(code ?? 1);
+    if (mode === 'continuous') {
+      console.error(
+        `[model-fetcher] sync daemon exited unexpectedly (code=${code ?? 'null'}, signal=${signal ?? 'null'})`
+      );
+    } else {
+      console.log(
+        `[model-fetcher] limited sync finished (code=${code ?? 'null'}, signal=${signal ?? 'null'})`
+      );
+    }
   });
 
   return child;
 }
 
+function stopSyncProcess(signal = 'SIGTERM') {
+  if (!syncProcess) return false;
+  syncState = {
+    ...syncState,
+    running: false,
+    mode: 'idle',
+    targetModels: null,
+    stoppedAt: new Date().toISOString(),
+  };
+  syncProcess.kill(signal);
+  return true;
+}
+
+async function readJsonBody(req) {
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(chunk);
+  }
+
+  if (chunks.length === 0) return {};
+
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch {
+    throw new Error('Invalid JSON body');
+  }
+}
+
 async function createRequestHandler(req, res) {
   if (!req.url) {
     writeJson(res, 400, { error: 'Invalid request URL' });
-    return;
-  }
-
-  if (req.method !== 'GET' && req.method !== 'HEAD') {
-    res.writeHead(405, { Allow: 'GET, HEAD' });
-    res.end();
     return;
   }
 
@@ -107,12 +191,81 @@ async function createRequestHandler(req, res) {
   }
 
   if (pathname === '/health') {
-    writeJson(res, 200, {
-      ok: true,
-      service: 'model-fetcher',
-      intervalMin: INTERVAL_MIN,
-      updatedAt: new Date().toISOString(),
-    });
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.writeHead(405, { Allow: 'GET, HEAD' });
+      res.end();
+      return;
+    }
+    writeJson(res, 200, getStatusPayload());
+    return;
+  }
+
+  if (pathname === '/control/status') {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      res.writeHead(405, { Allow: 'GET, HEAD' });
+      res.end();
+      return;
+    }
+    writeJson(res, 200, getStatusPayload());
+    return;
+  }
+
+  if (pathname === '/control/start') {
+    if (req.method !== 'POST') {
+      res.writeHead(405, { Allow: 'POST' });
+      res.end();
+      return;
+    }
+    if (syncProcess) {
+      writeJson(res, 409, { error: 'Fetcher is already running', ...getStatusPayload() });
+      return;
+    }
+
+    let body;
+    try {
+      body = await readJsonBody(req);
+    } catch (error) {
+      writeJson(res, 400, { error: error.message });
+      return;
+    }
+
+    const mode = body?.mode;
+    const targetModels = Number(body?.targetModels);
+    if (mode === 'continuous') {
+      startSyncProcess('continuous');
+      writeJson(res, 200, getStatusPayload());
+      return;
+    }
+    if (mode === 'limited' && Number.isInteger(targetModels) && targetModels > 0) {
+      startSyncProcess('limited', targetModels);
+      writeJson(res, 200, getStatusPayload());
+      return;
+    }
+
+    writeJson(res, 400, { error: 'Invalid start payload' });
+    return;
+  }
+
+  if (pathname === '/control/stop') {
+    if (req.method !== 'POST') {
+      res.writeHead(405, { Allow: 'POST' });
+      res.end();
+      return;
+    }
+
+    if (!syncProcess) {
+      writeJson(res, 200, getStatusPayload());
+      return;
+    }
+
+    stopSyncProcess();
+    writeJson(res, 200, getStatusPayload());
+    return;
+  }
+
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.writeHead(405, { Allow: 'GET, HEAD' });
+    res.end();
     return;
   }
 
@@ -157,7 +310,6 @@ async function createRequestHandler(req, res) {
 
 async function main() {
   await ensureDirectories();
-  const syncDaemon = startSyncDaemon();
 
   const server = http.createServer((req, res) => {
     createRequestHandler(req, res).catch((err) => {
@@ -172,12 +324,12 @@ async function main() {
 
     console.log(`[model-fetcher] received ${signal}, shutting down`);
     server.close(() => {
-      syncDaemon.kill('SIGTERM');
+      stopSyncProcess('SIGTERM');
       process.exit(0);
     });
 
     setTimeout(() => {
-      syncDaemon.kill('SIGKILL');
+      stopSyncProcess('SIGKILL');
       process.exit(1);
     }, 5000).unref();
   }

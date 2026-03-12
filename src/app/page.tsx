@@ -9,6 +9,7 @@ import TokenizerOutput from '@/components/TokenizerOutput/TokenizerOutput';
 import { getExampleHelloWorld } from '@/example-inputs/helloWorld';
 import { getExampleReasoning } from '@/example-inputs/reasoning';
 import { getExampleToolUsage } from '@/example-inputs/toolUsage';
+import { isModelFetcherEnabled } from '@/utils/modelFetcher';
 import { Template } from '@huggingface/jinja';
 
 const exampleInputOptions = [
@@ -19,6 +20,17 @@ const exampleInputOptions = [
 
 
 const defaultExampleKey = 'helloWorld';
+
+type FetcherStatus = {
+  running: boolean;
+  mode: 'idle' | 'limited' | 'continuous';
+  targetModels: number | null;
+  startedAt: string | null;
+  stoppedAt: string | null;
+  lastExitCode: number | null;
+  lastExitSignal: string | null;
+  intervalMin: number;
+};
 
 function fillMissingVariables(inputObj: any, templateStr: string) {
   const regex = /{{\s*([\w.]+)\s*([+*/-])\s*([\w.]*)\s*}}/g;
@@ -58,6 +70,7 @@ function formatChatInputsForGptPrompt(
 }
 
 export default function HomePage() {
+  const fetcherEnabled = isModelFetcherEnabled();
   const [chatInputs, setChatInputs] = useState([
     { role: 'system', content: 'You are a helpful assistant' }
   ]);
@@ -76,12 +89,26 @@ export default function HomePage() {
   const [gptMessageMode, setGptMessageMode] = useState(false); // 🆕
   const [isModelDataLoading, setIsModelDataLoading] = useState(false);
   const [isTokenizerModalOpen, setIsTokenizerModalOpen] = useState(false);
+  const [fetcherMode, setFetcherMode] = useState<'limited' | 'continuous'>('limited');
+  const [fetcherTargetModels, setFetcherTargetModels] = useState('10');
+  const [fetcherStatus, setFetcherStatus] = useState<FetcherStatus | null>(null);
+  const [fetcherActionError, setFetcherActionError] = useState<string | undefined>(undefined);
+  const [isFetcherActionLoading, setIsFetcherActionLoading] = useState(false);
 
 
 
 
   useEffect(() => {
     async function fetchTemplates() {
+      if (!fetcherEnabled) {
+        setGptMessageMode(false);
+        setFormattedTemplates([]);
+        setSelectedTemplateName('');
+        setEditedTemplate('');
+        setIsModelDataLoading(false);
+        return;
+      }
+
       setIsModelDataLoading(true);
       // Step 1: Detect GPT-like models *before* fetching
       const modelName = modelId.toLowerCase();
@@ -167,7 +194,90 @@ export default function HomePage() {
     }
 
     fetchTemplates();
-  }, [modelId]);
+  }, [fetcherEnabled, modelId]);
+
+  useEffect(() => {
+    if (!fetcherEnabled) {
+      setFetcherStatus(null);
+      setFetcherActionError(undefined);
+      return;
+    }
+
+    let isActive = true;
+
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch('/api/fetcher-control/status', { cache: 'no-store' });
+        if (!res.ok) {
+          throw new Error(`Status request failed with ${res.status}`);
+        }
+        const data = await res.json();
+        if (isActive) {
+          setFetcherStatus(data);
+          setFetcherActionError(undefined);
+        }
+      } catch (error: any) {
+        if (isActive) {
+          setFetcherActionError(error?.message || 'Failed to load fetcher status');
+        }
+      }
+    };
+
+    fetchStatus();
+    const intervalId = setInterval(fetchStatus, 3000);
+
+    return () => {
+      isActive = false;
+      clearInterval(intervalId);
+    };
+  }, [fetcherEnabled]);
+
+  const handleFetcherStart = async () => {
+    setIsFetcherActionLoading(true);
+    setFetcherActionError(undefined);
+
+    try {
+      const payload =
+        fetcherMode === 'continuous'
+          ? { mode: 'continuous' }
+          : { mode: 'limited', targetModels: Number(fetcherTargetModels) };
+
+      const res = await fetch('/api/fetcher-control/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || `Start request failed with ${res.status}`);
+      }
+      setFetcherStatus(data);
+    } catch (error: any) {
+      setFetcherActionError(error?.message || 'Failed to start fetcher');
+    } finally {
+      setIsFetcherActionLoading(false);
+    }
+  };
+
+  const handleFetcherStop = async () => {
+    setIsFetcherActionLoading(true);
+    setFetcherActionError(undefined);
+
+    try {
+      const res = await fetch('/api/fetcher-control/stop', {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.error || `Stop request failed with ${res.status}`);
+      }
+      setFetcherStatus(data);
+    } catch (error: any) {
+      setFetcherActionError(error?.message || 'Failed to stop fetcher');
+    } finally {
+      setIsFetcherActionLoading(false);
+    }
+  };
 
 
   const selectedTemplate = formattedTemplates.find(t => t.name === selectedTemplateName);
@@ -216,7 +326,85 @@ export default function HomePage() {
 
   return (
     <main className="relative pt-14 min-h-screen bg- dark:bg-dark-500 dark:text-white font-tinos">
-      <div className="grid grid-cols-1 md:grid-cols-2 md:grid-rows-2 gap-4 p-4 h-[calc(100vh-3.5rem)]">
+      {fetcherEnabled && (
+        <div className="px-4 pt-4">
+          <div className="rounded-md border border-gray-400 dark:border-white/20 bg-white dark:bg-gray-900 px-4 py-3 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-sm font-semibold">Model Fetcher</div>
+                <div className="text-xs text-gray-600 dark:text-white/60">
+                  Status: {fetcherStatus?.running ? `running (${fetcherStatus.mode})` : 'stopped'}
+                  {fetcherStatus?.mode === 'limited' && fetcherStatus?.targetModels
+                    ? `, target ${fetcherStatus.targetModels} models`
+                    : ''}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                <select
+                  value={fetcherMode}
+                  onChange={(e) => setFetcherMode(e.target.value as 'limited' | 'continuous')}
+                  disabled={isFetcherActionLoading || fetcherStatus?.running}
+                  className="text-xs px-2 py-2 border rounded dark:border-white/30 dark:text-white bg-white dark:bg-gray-800"
+                >
+                  <option value="limited">Fetch a fixed number</option>
+                  <option value="continuous">Fetch until stopped</option>
+                </select>
+
+                <input
+                  type="number"
+                  min="1"
+                  value={fetcherTargetModels}
+                  onChange={(e) => setFetcherTargetModels(e.target.value)}
+                  disabled={
+                    fetcherMode !== 'limited' || isFetcherActionLoading || fetcherStatus?.running
+                  }
+                  className="text-xs px-2 py-2 border rounded dark:border-white/30 dark:text-white bg-white dark:bg-gray-800 w-40"
+                  placeholder="How many models"
+                />
+
+                <button
+                  onClick={handleFetcherStart}
+                  disabled={
+                    isFetcherActionLoading ||
+                    !!fetcherStatus?.running ||
+                    (fetcherMode === 'limited' && (!Number.isInteger(Number(fetcherTargetModels)) || Number(fetcherTargetModels) <= 0))
+                  }
+                  className="text-xs px-3 py-2 border rounded dark:border-white/30 dark:text-white bg-white dark:bg-gray-800 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Start
+                </button>
+
+                <button
+                  onClick={handleFetcherStop}
+                  disabled={isFetcherActionLoading || !fetcherStatus?.running}
+                  className="text-xs px-3 py-2 border rounded dark:border-white/30 dark:text-white bg-white dark:bg-gray-800 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Stop
+                </button>
+              </div>
+            </div>
+
+            {(fetcherActionError || fetcherStatus?.startedAt || fetcherStatus?.stoppedAt) && (
+              <div className="mt-2 text-xs text-gray-600 dark:text-white/60">
+                {fetcherActionError
+                  ? fetcherActionError
+                  : fetcherStatus?.running
+                    ? `Started at ${fetcherStatus.startedAt}`
+                    : fetcherStatus?.stoppedAt
+                      ? `Last stopped at ${fetcherStatus.stoppedAt}`
+                      : ''}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div
+        className={`grid grid-cols-1 md:grid-cols-2 md:grid-rows-2 gap-4 p-4 ${
+          fetcherEnabled ? 'h-[calc(100vh-10rem)]' : 'h-[calc(100vh-3.5rem)]'
+        }`}
+      >
         <div className="md:row-span-2">
           <TemplateBox
             modelId={modelId}
@@ -310,6 +498,7 @@ export default function HomePage() {
                 model={modelId}
                 type={getTokenizerType(modelId)}
                 externalLoading={isModelDataLoading}
+                fetcherEnabled={fetcherEnabled}
               />
             </div>
           </div>

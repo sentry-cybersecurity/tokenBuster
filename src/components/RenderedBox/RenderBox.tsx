@@ -5,6 +5,7 @@ import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
 import copy from 'copy-to-clipboard';
 import LoadingOverlay from '@/components/LoadingOverlay';
+import { isModelFetcherEnabled } from '@/utils/modelFetcher';
 
 type OutputViewerProps = {
   content: string;
@@ -43,6 +44,7 @@ export default function OutputViewer({
   chatInputs, // ✅ properly destructured
   loading = false,
 }: OutputViewerProps) {
+  const fetcherEnabled = isModelFetcherEnabled();
   const [copied, setCopied] = useState(false);
   const [wrapLines, setWrapLines] = useState(true);
   const [renderedContent, setRenderedContent] = useState(content);
@@ -80,6 +82,12 @@ export default function OutputViewer({
   }, [isSpecialTokensModalOpen]);
 
   const fetchSpecialTokens = async () => {
+    if (!fetcherEnabled) {
+      setSpecialTokens([]);
+      setSpecialTokensError('Model fetcher is disabled.');
+      return;
+    }
+
     if (!modelId || !modelId.includes('/')) {
       setSpecialTokens([]);
       setSpecialTokensError('No valid model selected.');
@@ -131,6 +139,7 @@ export default function OutputViewer({
             <button
               onClick={openSpecialTokensModal}
               title="View Special Tokens"
+              disabled={!fetcherEnabled}
               className="text-xs px-2 py-1 border rounded dark:border-white/30 dark:text-white relative cursor-pointer"
             >
               Special Tokens

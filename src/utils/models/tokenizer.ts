@@ -1,5 +1,5 @@
 import { TiktokenModel } from '@dqbd/tiktoken';
-
+import { isModelFetcherEnabled } from '@/utils/modelFetcher';
 
 
 export type TokenizerType = 'tiktoken' | 'xenova';
@@ -60,6 +60,10 @@ export async function tokenize(
   }
 
   if (type === 'xenova') {
+    if (!isModelFetcherEnabled()) {
+      throw new Error('Model fetcher is disabled for Xenova tokenizers.');
+    }
+
     if (typeof window === 'undefined') {
       throw new Error('Xenova tokenizer must run in the browser');
     }
@@ -132,6 +136,10 @@ export async function detokenize(
 
 
   if (type === 'xenova') {
+    if (!isModelFetcherEnabled()) {
+      throw new Error('Model fetcher is disabled for Xenova tokenizers.');
+    }
+
     if (typeof window === 'undefined') {
       throw new Error('Xenova tokenizer must run in the browser');
     }
@@ -212,6 +220,10 @@ export async function getTokenDetails(
   }
 
   if (type === 'xenova') {
+    if (!isModelFetcherEnabled()) {
+      throw new Error('Model fetcher is disabled for Xenova tokenizers.');
+    }
+
     const { AutoTokenizer, env } = await import('@xenova/transformers');
     if (!(env as any)._configured) {
       env.localModelPath = '';
